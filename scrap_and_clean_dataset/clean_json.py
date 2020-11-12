@@ -26,5 +26,5 @@ if __name__ == '__main__':
 
     print(len(json_data['GraphImages']))
 
-    with open('text_data/all_jsons.json', 'w') as f:
+    with open('../text_data/all_jsons.json', 'w') as f:
         json.dump(json_data, f)

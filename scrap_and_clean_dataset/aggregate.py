@@ -22,5 +22,5 @@ if __name__ == '__main__':
     for file_to_add in tqdm(aggr(sys.argv[1])):
         result['GraphImages'].extend(get_contents(file_to_add))
 
-    with open('text_data/all_jsons.json', 'w') as f:
+    with open('../text_data/all_jsons.json', 'w') as f:
         json.dump(result, f)

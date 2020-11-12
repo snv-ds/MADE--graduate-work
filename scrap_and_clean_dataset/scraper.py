@@ -27,6 +27,6 @@ def scrap_tag(tag, max_uploads=1000):
 
 
 if __name__ == '__main__':
-    for tag in read_file('text_data/top_tags.txt'):
+    for tag in read_file('../text_data/top_tags.txt'):
         print(tag)
         scrap_tag(tag)
