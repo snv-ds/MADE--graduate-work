@@ -55,10 +55,10 @@ class SimpleTwoLevelSingleModel(nn.Module):
         x2 = self.lev2(x2)
         return torch.cat((x1, x2), 1)
 
-class HastTagTodel():
+class HastTagModel():
     
     def __init__(self):
-        model = 'resnet18'
+        model = 'resnet101'
         output_dir = 'models_feat'
         data_path = 'data'
         image_size = 256
@@ -149,12 +149,12 @@ def test(model, data_path):
 def main():
 
     
-    hast_tag_model = HastTagTodel()
+    hast_tag_model = HastTagModel()
     
-    with open(os.path.join('models', "model_ver_1.pkl"), 'wb') as f:
+    with open(os.path.join('models', "model_ver_2.pkl"), 'wb') as f:
         pickle.dump(hast_tag_model, f)
         
-        
+    data_path = 'data'    
     test(hast_tag_model, data_path)   
         
     
