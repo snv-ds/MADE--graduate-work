@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import sigmoid
 import tqdm
-from dataset import HashTagImageDataset, HashTagFeatureDataset
+from dataset import HashTagFeatureDataset
 from torch import optim
 from torch.utils.data import DataLoader
 from torch.utils.data import RandomSampler
@@ -20,8 +20,7 @@ import torchvision.models as models
 sys.path.insert(0, os.path.abspath((os.path.dirname(__file__)) + '/../'))
 from utils import get_logger
 
-NUM_LEV1_CATEGORIES = 22
-NUM_LEV2_CATEGORIES = 113
+NUM_CATEGORIES = 22
 
 class SimpleLayersModel(nn.Module):
     def __init__(self, pretrained_model):
@@ -32,36 +31,14 @@ class SimpleLayersModel(nn.Module):
     def forward(self, x):
         x = F.relu(self.pretrained_model(x))
         return self.last_layer(x)
-
-class SimpleSingleModel(nn.Module):
-    def __init__(self):
-        super(SimpleSingleModel, self).__init__()
-        self.last_layer = nn.Linear(1000, NUM_CATEGORIES, bias=True)
-
-    def forward(self, x):
-        return self.last_layer(x)
-
-class SimpleTwoLevelSingleModel(nn.Module):
-    def __init__(self):
-        super(SimpleTwoLevelSingleModel, self).__init__()
-        self.lev1 = nn.Linear(1000, NUM_LEV1_CATEGORIES, bias=True)
-        self.lev2 = nn.Linear(1000 + NUM_LEV1_CATEGORIES, NUM_LEV2_CATEGORIES, bias=True)
-    def forward(self, x):
-        x1 = self.lev1(x)
-        x2 = torch.cat((x, x1), 1)
-        #print(x.shape, x1.shape, x2.shape)
-        x2 = self.lev2(x2)
-        return torch.cat((x1, x2), 1)
-        
     
 def accuracy_k(output, target, topk=3):
     """Computes the precision@k for the specified values of k"""
 
     batch_size = target.size(0)
 
-    #_, pred = output.topk(topk, 1, True, True)
-    _, pred = output.topk(topk, 1, True, False)
-    #print('output ', output[0, :], pred[0, :])
+    _, pred = output.topk(topk, 1, True, True)
+
     res = 0
     for j in range(batch_size):
         res += torch.sum(target[j, pred[j]]) / torch.sum(target[j])
@@ -70,58 +47,18 @@ def accuracy_k(output, target, topk=3):
 
 def eval_net(net, dataset, device):
     net.eval()
-    total3_level1 = 0
-    total3_level2 = 0
-    total3 = 0
-    
-    total1_level1 = 0
-    total1_level2 = 0
-    total1 = 0
-    
-    cat_lev1 = {it[1]:it[0] for it in dataset.dataset.category_id.items()}
-    cat_all = {it[1]:it[0] for it in dataset.dataset.all_category_id.items()}
-    #print(cat_all)
-    
+    total_1 = 0
+    total = 0
     with torch.no_grad():
         for i, batch in tqdm.tqdm(enumerate(dataset), total=len(dataset)):
             imgs = batch["image"]
             target = batch["target"]
-            mask = batch["mask"]
             #print(imgs.shape)
-            pred = sigmoid(net(imgs.to(device)).squeeze(1))  # (b, 1, h, w) -> (b, h, w)
-            probs = (pred > 0.3).float()
-            
-            #for j in range(pred.shape[0]):
-                
-                # cat1_true = [cat_lev1[ii] for ii, v in enumerate(target[j, :NUM_LEV1_CATEGORIES].tolist()) if v == 1]
-                # print('lev1 ', cat1_true)
-                # for l in range(NUM_LEV1_CATEGORIES):
-                #     if pred[j, l] > 0.1:
-                #         print(cat_lev1[l], pred[j, l].item())
-                        
-                # cat2_true = [i for i, v in enumerate(target[j, NUM_LEV1_CATEGORIES:].tolist()) if v == 1]       
-                # print(cat2_true)
-                # cat2_true = [cat_all[ii + NUM_LEV1_CATEGORIES] for ii, v in enumerate(target[j, NUM_LEV1_CATEGORIES:].tolist()) if v == 1] 
-                # num_mask = [ii for ii, v in enumerate(mask[j,:].tolist())  if v == 1]
-                
-                # print('lev2 ', cat2_true)
-                # print(num_mask)
-                # for l in num_mask:
-                #     id = l# + NUM_LEV1_CATEGORIES
-                #     if pred[j, id] > 0.1:
-                #         print(cat_all[id], pred[j, id].item())
-
-            total3_level1 += accuracy_k(pred[:, :NUM_LEV1_CATEGORIES], target[:, :NUM_LEV1_CATEGORIES], 3)
-            non_zero = torch.sum(target[:, NUM_LEV1_CATEGORIES:],  1) > 0
-            total3_level2 += accuracy_k(pred[non_zero, NUM_LEV1_CATEGORIES:], target[non_zero, NUM_LEV1_CATEGORIES:], 3)
-            total3 += accuracy_k(pred, target, 3)
-            
-            total1_level1 += accuracy_k(pred[:, :NUM_LEV1_CATEGORIES], target[:, :NUM_LEV1_CATEGORIES], 1)
-            non_zero = torch.sum(target[:, NUM_LEV1_CATEGORIES:],  1) > 0
-            total1_level2 += accuracy_k(pred[non_zero, NUM_LEV1_CATEGORIES:], target[non_zero, NUM_LEV1_CATEGORIES:], 1)
-            total1 += accuracy_k(pred, target, 1)
-
-    return total3 / i, total3_level1 / i, total3_level2 / i, total1 / i, total1_level1 / i, total1_level2 / i
+            pred = net(imgs.to(device)).squeeze(1)  # (b, 1, h, w) -> (b, h, w)
+            probs = (sigmoid(pred) > 0.5).float()
+            total += accuracy_k(probs, target, 3)
+            #print(i, total)
+    return total / i
 
 
 def train(net, optimizer, criterion, scheduler, train_dataloader, val_dataloader, logger, args=None, device=None):
@@ -140,25 +77,13 @@ def train(net, optimizer, criterion, scheduler, train_dataloader, val_dataloader
         for i, batch in tqdm_iter:
             imgs = batch["image"]
             target = batch["target"]
-            mask = batch["mask"]
             
             pred = net(imgs.to(device))
             probs = sigmoid(pred)
 
-            #print(probs.shape, target.float().shape)
-            loss = criterion(probs[:, :NUM_LEV1_CATEGORIES], target.float()[:, :NUM_LEV1_CATEGORIES])
-            
-            
-            loss2 = criterion(probs * mask, target.float() * mask)
-            
-            num_mask = [ii for ii, v in enumerate(mask[1,:].tolist())  if v == 1]
-            #print(num_mask)
-            #print((probs * mask)[1, num_mask].tolist(), 
-            #      (target.float() * mask)[1, num_mask].tolist(), 
-            #      target.float()[1, :NUM_LEV1_CATEGORIES].tolist())
-            #print("loss {:}, {:}".format(loss, loss2))
-            loss += loss2
-            
+            #loss = nn.BCELoss()
+            loss = criterion(probs, target.float())
+
             epoch_loss += loss.item()
             tqdm_iter.set_description('mean loss: {:.4f}'.format(epoch_loss / (i + 1)))
 
@@ -171,10 +96,8 @@ def train(net, optimizer, criterion, scheduler, train_dataloader, val_dataloader
 
         logger.info('Epoch finished! Loss: {:.5f}'.format(epoch_loss / num_batches))
 
-        val3_score, val3_score1, val3_score2, val1_score, val1_score1, val1_score2 = eval_net(net, val_dataloader, device=device)
-        logger.info('Validation acc3: {:.4f} for lev1: {:.4f}, for lev2: {:.4f}  acc1: {:.4f} for lev1: {:.4f}, for lev2: {:.4f} '.format(val3_score, val3_score1, val3_score2, 
-                                                                                                                                          val1_score, val1_score1, val1_score2))
-        
+        val_score = eval_net(net, val_dataloader, device=device)
+        logger.info('Validation acc: {:.5f} by class '.format(val_score))
         # if val_dice > best_model_info['val_dice']:
         #     best_model_info['val_dice'] = val_dice
         #     best_model_info['train_loss'] = epoch_loss / num_batches
@@ -198,12 +121,11 @@ def main():
     parser.add_argument('-lrg', '--learning_rate_gamma', dest='lr_gamma', default=0.5, type=float,
                         help='learning rate gamma')
     parser.add_argument('-wd', '--weight_decay', dest='weight_decay', default=5e-4, type=float, help='weight decay')
-    parser.add_argument('-m', '--model', dest='model', default='resnet18', choices=('resnet18', 'resnet101', 'wide_resnet50'))
+    parser.add_argument('-m', '--model', dest='model', default='resnet18', choices=('resnet18', 'wide_resnet50'))
     parser.add_argument('-l', '--load', dest='load', default=False, help='load file model')
     parser.add_argument('-v', '--val_split', dest='val_split', default=0.8, help='train/val split')
     parser.add_argument('-o', '--output_dir', dest='output_dir', default='/tmp/logs/', help='dir to save log and models')
     parser.add_argument('-c', '--continue_calc',  help="continue calculation", action="store_true")
-    parser.add_argument('-f', '--features_file',  help="use features", default=None, type=str)
     args = parser.parse_args()
     #
     os.makedirs(args.output_dir, exist_ok=True)
@@ -213,17 +135,15 @@ def main():
     for arg, value in sorted(vars(args).items()):
         logger.info("Argument %s: %r", arg, value)
     
-    if args.features_file is None:
-        if args.model == 'resnet18':
-            pretrained_model = models.resnet18(pretrained=True)
-            pretrained_model.fc = nn.Linear(pretrained_model.fc.in_features, 1000, bias=True)
-            net = SimpleLayersModel(pretrained_model)
-        if args.model == 'wide_resnet50':
-            pretrained_model = models.wide_resnet50_2(pretrained=True)
-            pretrained_model.fc = nn.Linear(pretrained_model.fc.in_features, 1000, bias=True)
-            net = SimpleLayersModel(pretrained_model)
-    else:
-        net = SimpleTwoLevelSingleModel()
+    
+    if args.model == 'resnet18':
+        pretrained_model = models.resnet18(pretrained=True)
+        pretrained_model.fc = nn.Linear(pretrained_model.fc.in_features, 1000, bias=True)
+        net = SimpleLayersModel(pretrained_model)
+    if args.model == 'wide_resnet50':
+        pretrained_model = models.wide_resnet50_2(pretrained=True)
+        pretrained_model.fc = nn.Linear(pretrained_model.fc.in_features, 1000, bias=True)
+        net = SimpleLayersModel(pretrained_model)
 
     # TODO: img_size=256 is rather mediocre, try to optimize network for at least 512
     logger.info('Model type: {}'.format(net.__class__.__name__))
@@ -249,34 +169,26 @@ def main():
     # TODO: you can always try on plateau scheduler as a default option
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=args.lr_step, gamma=args.lr_gamma) \
         if args.lr_step > 0 else None
-                
-    if args.features_file is None:
-        # dataset
-        # TODO: to work on transformations a lot, look at albumentations package for inspiration
-        train_transforms = Compose([
-            Crop(min_size=1 - 1 / 3., min_ratio=1.0, max_ratio=1.0, p=0.5),
-            Flip(p=0.05),
-            Pad(max_size=0.6, p=0.25),
-            Resize(size=(args.image_size, args.image_size), keep_aspect=True),
-            ToPILImage()
-        ])
-        # TODO: don't forget to work class imbalance and data cleansing
-        val_transforms = Compose([
-            Resize(size=(args.image_size, args.image_size), keep_aspect=True),
-            ToPILImage()
-        ])
-        
-        train_dataset = HashTagDataset(args.data_path, labels_file = os.path.join(args.data_path, 'data_set.csv'),
-                                     split = 'train', transforms=train_transforms)
-        val_dataset = HashTagDataset(args.data_path, labels_file = os.path.join(args.data_path, 'data_set.csv'), 
-                                     split = 'val', transforms=val_transforms)
-    else:
-        train_dataset = HashTagFeatureDataset(args.data_path, labels_file = os.path.join(args.data_path, 'data_set.csv'),
-                                     features_file = args.features_file,
-                                     split = 'train')
-        val_dataset = HashTagFeatureDataset(args.data_path, labels_file = os.path.join(args.data_path, 'data_set.csv'), 
-                                     features_file = args.features_file,       
-                                     split = 'val')
+
+    # dataset
+    # TODO: to work on transformations a lot, look at albumentations package for inspiration
+    train_transforms = Compose([
+        Crop(min_size=1 - 1 / 3., min_ratio=1.0, max_ratio=1.0, p=0.5),
+        Flip(p=0.05),
+        Pad(max_size=0.6, p=0.25),
+        Resize(size=(args.image_size, args.image_size), keep_aspect=True),
+        ToPILImage()
+    ])
+    # TODO: don't forget to work class imbalance and data cleansing
+    val_transforms = Compose([
+        Resize(size=(args.image_size, args.image_size)),
+        ToPILImage()
+    ])
+    
+    train_dataset = HashTagDataset(args.data_path, labels_file = os.path.join(args.data_path, 'data_set.csv'),
+                                 split = 'train', transforms=train_transforms)
+    val_dataset = HashTagDataset(args.data_path, labels_file = os.path.join(args.data_path, 'data_set.csv'), 
+                                 split = 'val', transforms=val_transforms)
 
 
     #print(train_size)
