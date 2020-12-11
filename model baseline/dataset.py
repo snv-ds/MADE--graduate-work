@@ -6,10 +6,13 @@ import pandas as pd
 from torch.utils.data import Dataset
 import pickle
 
-TRAIN_SIZE = 0.9
+TRAIN_SIZE = 0.8
 TRAIN_USED = 1.000
-MAX_VAL_SIZE = 0.1
+MAX_VAL_SIZE = 0.2
 MAX_ALL_SIZE = 1.0
+
+NUM_LEV1_CATEGORIES = 16 #22
+NUM_LEV2_CATEGORIES = 237 #113
 
 class HashTagImageDataset(Dataset):
 
@@ -62,7 +65,9 @@ class HashTagImageDataset(Dataset):
         with open(os.path.join(self.data_path, "lev2_category_id.pkl"), 'rb') as f:
             self.all_category_id = pickle.load(f)    
         
-        self.targets = np.array([self.category_id[tag] for tag in df.base_tag])
+        self.targets = np.array([self.category_id.get(tag, 0) for tag in df.base_tag])
+        
+        #self.targets = np.array([self.category_id[tag] for tag in row['tags'].split(' ') if tag in self.category_id])
         
         #print(self.image_names)
         #print(self.tags)
@@ -95,7 +100,7 @@ class HashTagImageDataset(Dataset):
         
         sample["image"] = image
         
-        target = np.zeros(22)
+        target = np.zeros(NUM_LEV1_CATEGORIES)
         target[self.targets[item]] = 1
         sample["target"] = target
         
@@ -119,11 +124,15 @@ class HashTagFeatureDataset(Dataset):
         df_label.drop_duplicates(inplace=True)
         
         df_label['img'] = df_label.apply(lambda x: os.path.join(data_path, x['base_tag'].strip(), x['urls'].strip()), axis = 1)
+        df_label.reset_index(inplace=True)
 
         self.df = self.df.merge(df_label)
-        
+        self.df = self.df.sort_values('index').reset_index(drop=True)
+
         with open(os.path.join(self.data_path, "category_id.pkl"), 'rb') as f:
             self.category_id = pickle.load(f)
+            
+        
             
         with open(os.path.join(self.data_path, "lev2_category_id.pkl"), 'rb') as f:
             self.all_category_id = pickle.load(f)        
@@ -131,19 +140,40 @@ class HashTagFeatureDataset(Dataset):
         with open(os.path.join(self.data_path, "lev1_lev2_category_id.pkl"), 'rb') as f:
             self.lev1_lev2_category_id = pickle.load(f)  
             
+        self.num_lev1_categories = np.max([id for tag, id in self.category_id.items()]) + 1    
+        self.num_lev2_categories = np.max([id for id1, d in self.lev1_lev2_category_id.items() for tag, id in d.items()]) + 1 - self.num_lev1_categories    
+            
+
+        find_indx = []
         for i, row in self.df.iterrows():    
-            lev1_tags = [self.category_id[tag] for tag in row['base_tag'].split(' ')]
+            lev1_tags = [self.category_id[tag] for tag in row['tags'].split(' ') if tag in self.category_id]
             lev2_tags = []
             mask = []
+            
+            #print(lev1_tags, row['tags'])
+            if len(lev1_tags) == 0 and split != "all": 
+                continue
+
             for lev1_tag in lev1_tags:  
-                all_tags = [item.strip("'',") for item in row['tags'].strip('[]').split(' ')]
+                # all_tags = [item.strip("'',") for item in row['tags'].strip('[]').split(' ')]
+                all_tags = [item.strip(" ") for item in row['tags'].split(' ')]
                 list_tag = [t_tag for t_tag in all_tags if t_tag in self.lev1_lev2_category_id[lev1_tag]]
                 lev2_tags += [self.lev1_lev2_category_id[lev1_tag][tag] for tag in list_tag]
                 mask += self.lev1_lev2_category_id[lev1_tag].values()
-            #print("----")
-            #print(list_tag, lev2_tags, mask)
-            self.targets.append(np.array(lev1_tags + lev2_tags))
-            self.masks.append(mask)
+            
+            if len(lev1_tags) > 0:
+                self.targets.append(np.array(lev1_tags + lev2_tags))
+                self.masks.append(mask)
+            else:
+                self.targets.append(np.array([0]))
+                self.masks.append([0])
+            find_indx.append(i)
+        
+        find_idxs = np.array(find_indx)  
+        
+        self.df = self.df.iloc[find_idxs, :]   
+            
+            
         #print(1/0)
         #self.targets = np.array()
         
@@ -183,6 +213,7 @@ class HashTagFeatureDataset(Dataset):
         with open(os.path.join(self.data_path, "category_id.pkl"), 'rb') as f:
             self.category_id = pickle.load(f)
                 
+        #print(self.category_id)    
         self.targets = np.array([self.category_id[tag] for tag in df.base_tag])
         
         #print(self.image_names)
@@ -199,15 +230,22 @@ class HashTagFeatureDataset(Dataset):
         sample = {}
   
         sample["image"] = self.df.iloc[item, 1:1001].to_numpy(np.float32)
+    
         
-        target = np.zeros(22 + 113)
+        target = np.zeros(self.num_lev1_categories + self.num_lev2_categories)
+        
+        #print(item)
+        #print(self.targets)
+        #print(self.targets[item], target.shape)
         target[self.targets[item]] = 1
         sample["target"] = target
         
-        mask = np.zeros(22 + 113)
+        mask = np.zeros(self.num_lev1_categories + self.num_lev2_categories)
         #print('mask', self.masks[item])
         mask[self.masks[item]] = 1
         #print(mask)
         sample["mask"] = mask
+        
+        sample["tags"] = self.df.tags.iloc[item]
         #print(sample)
         return sample
