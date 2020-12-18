@@ -77,11 +77,15 @@ class HastTagTodel():
         with open("lev1_lev2_category_id.pkl", 'rb') as f:
                 self.lev1_lev2_category_id = pickle.load(f)
         
-        
     def predict(self, image):
         image_size = 256
-        
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        try:
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        except cv2.error:
+            print(image)
+            image = np.fromfile(image, dtype=np.uint8)
+            image = cv2.imdecode(image, cv2.IMREAD_UNCHANGED)
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         image = image.astype(np.float32) / 255.
  
         val_transforms = Compose([
@@ -99,7 +103,6 @@ class HastTagTodel():
             v, pred_1 = (pred[0, :NUM_LEV1_CATEGORIES]).topk(1, 0, True, False)
             id_lev1 = pred_1[0].data.tolist()
             cat1_true = self.lev1_category_names[id_lev1] # Level 1 category
-            
 
             cat2_true = []
             if id_lev1 != []:
@@ -116,24 +119,6 @@ class HastTagTodel():
                 cat2_true = [self.all_category_names[ii] for ii in pred_t ]        
         
         return [cat1_true] + cat2_true
-
-
-def test(model, data_path):
-    labels_file = os.path.join(data_path, 'data_set.csv')
-    
-    df = pd.read_csv(labels_file)
-    image_names = [os.path.join(data_path, tag, image_name) for image_name, tag in zip(df.urls, df.base_tag)]
-    
-    n = 500
-    good = 0
-    for i in np.random.choice(df.shape[0], 500):
-        image = cv2.imdecode(np.fromfile(image_names[i], dtype=np.uint8), cv2.IMREAD_UNCHANGED)
-        tags = model.predict(image)
-        res = df.base_tag[i] in tags
-        print(tags, df.base_tag[i], res)
-        good += res
-        
-    print('Точность: {:3.3f}'.format(good/n))
 
 
 def main():

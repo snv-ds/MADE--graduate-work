@@ -14,8 +14,13 @@ app = FastAPI(title="MADE graduate project",
 
 @app.post("/predict")
 def get_s(file: bytes = File(...)):
-    '''Get segmentation maps from image file'''
     tags = get_tags(model, file)
-    # bytes_io = io.BytesIO()
-    # tags.save(bytes_io, format='PNG')
     return JSONResponse(tags)
+#
+# @app.post("/predict_test")
+# def get_s_test(text):
+#     print(text)
+#     file = np.fromfile(text, dtype=np.uint8)
+#     tags = get_tags(model, file)
+#     return JSONResponse(tags)
+

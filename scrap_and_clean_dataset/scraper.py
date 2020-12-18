@@ -18,15 +18,17 @@ def delete_file_formats(path, file_format='mp4', verbose=True):
                 print(os.path.join(path, f))
 
 
-def scrap_tag(tag, max_uploads=1000):
+def scrap_tag(tag, max_uploads=500):
     output = subprocess.run(['python3', 'venv/bin/instagram-scraper', '--tag', tag, '--maximum', str(max_uploads),
                              '--media-metadata', '--media-types', 'image', '-q'])
-
-    delete_file_formats(tag, 'mp4', verbose=False)
+    try:
+        delete_file_formats(tag, 'mp4', verbose=False)
+    except FileNotFoundError:
+        pass
     return output
 
 
 if __name__ == '__main__':
-    for tag in read_file('../text_data/top_tags.txt'):
+    for tag in read_file('text_data/tags.txt'):
         print(tag)
-        scrap_tag(tag)
+        scrap_tag(tag, 1000)
